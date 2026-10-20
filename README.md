@@ -44,3 +44,90 @@ Recommendations for 'Avatar':
 Make sure you have Python installed along with the required libraries:
 ```bash
 pip install pandas numpy scikit-learn
+
+import ast
+import pandas as pd
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1. Load datasets
+movies = pd.read_csv('tmdb_5000_movies.csv')
+credits = pd.read_csv('tmdb_5000_credits.csv')
+
+# 2. Merge and clean data
+movies = movies.merge(credits, on='title')
+movies = movies[
+    ['movie_id', 'title', 'overview', 'genres', 'keywords', 'cast', 'crew']
+]
+movies.dropna(inplace=True)
+
+
+# 3. Helper functions for parsing JSON strings
+def convert(obj):
+  return [i['name'] for i in ast.literal_eval(obj)]
+
+
+def convert_cast(obj):
+  return [i['name'] for i in ast.literal_eval(obj)][:3]
+
+
+def fetch_director(obj):
+  for i in ast.literal_eval(obj):
+    if i['job'] == 'Director':
+      return [i['name']]
+  return []
+
+
+movies['genres'] = movies['genres'].apply(convert)
+movies['keywords'] = movies['keywords'].apply(convert)
+movies['cast'] = movies['cast'].apply(convert_cast)
+movies['crew'] = movies['crew'].apply(fetch_director)
+movies['overview'] = movies['overview'].apply(lambda x: x.split())
+
+
+# 4. Remove spaces between multi-word names
+def collapse(L):
+  return [i.replace(' ', '') for i in L]
+
+
+movies['genres'] = movies['genres'].apply(collapse)
+movies['keywords'] = movies['keywords'].apply(collapse)
+movies['cast'] = movies['cast'].apply(collapse)
+movies['crew'] = movies['crew'].apply(collapse)
+
+# 5. Create a combined tags column
+movies['tags'] = (
+    movies['overview']
+    + movies['genres']
+    + movies['keywords']
+    + movies['cast']
+    + movies['crew']
+)
+new_df = movies[['movie_id', 'title', 'tags']]
+new_df['tags'] = new_df['tags'].apply(lambda x: ' '.join(x))
+new_df['tags'] = new_df['tags'].str.lower()
+
+# 6. Vectorization & Cosine Similarity
+cv = CountVectorizer(max_features=5000, stop_words='english')
+vectors = cv.fit_transform(new_df['tags']).toarray()
+similarity = cosine_similarity(vectors)
+
+
+# 7. Recommendation function
+def recommend(movie):
+  try:
+    movie_index = new_df[new_df['title'] == movie].index[0]
+    distances = similarity[movie_index]
+    movies_list = sorted(
+        list(enumerate(distances)), reverse=True, key=lambda x: x[1]
+    )[1:6]
+
+    print(f"Recommendations for '{movie}':")
+    for i in movies_list:
+      print(f'- {new_df.iloc[i[0]].title}')
+  except IndexError:
+    print(f"Movie '{movie}' not found in database.")
+
+
+# Example Usage:
+recommend('Avatar')
